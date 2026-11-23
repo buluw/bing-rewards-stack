@@ -28,5 +28,8 @@ COPY --chmod=755 scripts/docker ./scripts/docker
 COPY --chmod=644 src/crontab.template /etc/cron.d/microsoft-rewards-cron.template
 COPY --chmod=755 scripts/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN find scripts/api -name '*.test.js' -delete
+COPY LICENSE ./LICENSE
+LABEL org.opencontainers.image.source="https://github.com/buluw/bing-rewards-stack" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later"
 EXPOSE 3010
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

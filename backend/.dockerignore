@@ -3,6 +3,7 @@
 !package-lock.json
 !tsconfig.json
 !config.example.json
+!LICENSE
 !src/
 !src/**
 !scripts/

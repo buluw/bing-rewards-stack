@@ -4,6 +4,9 @@ ENV NODE_ENV=production DATA_DIR=/data
 COPY package.json server.js ./
 COPY lib ./lib
 COPY public ./public
+COPY LICENSE ./LICENSE
+LABEL org.opencontainers.image.source="https://github.com/buluw/bing-rewards-stack" \
+      org.opencontainers.image.licenses="MIT"
 RUN mkdir -p /data
 EXPOSE 8890
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
