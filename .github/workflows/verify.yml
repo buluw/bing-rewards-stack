@@ -11,6 +11,9 @@ on:
         type: string
 permissions:
   contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   offline-tests:
     runs-on: ubuntu-latest
@@ -25,7 +28,7 @@ jobs:
         working-directory: backend
       - run: npm test
         working-directory: dashboard
-      - run: bash -n scripts/*.sh backend/scripts/docker/*.sh
+      - run: for file in scripts/*.sh backend/scripts/docker/*.sh; do bash -n "$file" || exit; done
   docker-smoke:
     needs: offline-tests
     runs-on: ubuntu-latest
@@ -53,6 +56,22 @@ jobs:
       - name: Start without accounts or schedules
         run: docker compose up -d --no-build --wait --wait-timeout 180
       - run: sleep 6 && bash scripts/check.sh
+      - name: Verify idle, authentication and disabled schedule
+        run: |
+          docker compose exec -T rewards-dashboard node <<'JS'
+          (async () => {
+            const base = 'http://127.0.0.1:8890';
+            if ((await fetch(base + '/api/health')).status !== 401) throw Error('Dashboard requires authentication');
+            const headers = {Authorization: 'Basic ' + Buffer.from(process.env.DASHBOARD_USERNAME + ':' + process.env.DASHBOARD_PASSWORD).toString('base64')};
+            const schedule = await (await fetch(base + '/api/schedule', {headers})).json();
+            if (schedule.local.enabled !== false) throw Error('Unexpected enabled schedule');
+            const token = {Authorization: 'Bearer ' + process.env.CONTROL_API_TOKEN};
+            const status = await (await fetch('http://ms-rewards:3010/status', {headers: token})).json();
+            if (status.state !== 'idle') throw Error('Unexpected running task');
+            if ((await fetch('http://ms-rewards:3010/health')).status !== 401) throw Error('Backend requires authentication');
+            console.log('Idle, disabled schedule and both authentication layers verified');
+          })().catch(e => {console.error(e.message); process.exitCode = 1;});
+          JS
       - name: Chromium and native module smoke test
         run: |
           docker compose exec -T ms-rewards node --input-type=module <<'JS'
