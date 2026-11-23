@@ -1,0 +1,9 @@
+*
+!package.json
+!package-lock.json
+!tsconfig.json
+!config.example.json
+!src/
+!src/**
+!scripts/
+!scripts/**

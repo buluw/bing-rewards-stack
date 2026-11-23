@@ -1,0 +1,80 @@
+name: Verify stack
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional new Release tag, for example v2026.11.23'
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --ignore-scripts && npm run test:rewards-fixes
+        working-directory: backend
+      - run: npm test
+        working-directory: dashboard
+      - run: bash -n scripts/*.sh backend/scripts/docker/*.sh
+  docker-smoke:
+    needs: offline-tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: bash scripts/init.sh
+      - run: docker compose config --quiet
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          tags: bing-rewards-backend:local
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - uses: docker/build-push-action@v6
+        with:
+          context: dashboard
+          tags: bing-rewards-dashboard:local
+          load: true
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard
+      - name: Start without accounts or schedules
+        run: docker compose up -d --no-build --wait --wait-timeout 180
+      - run: sleep 6 && bash scripts/check.sh
+      - name: Chromium and native module smoke test
+        run: |
+          docker compose exec -T ms-rewards node --input-type=module <<'JS'
+          import {chromium} from 'patchright';
+          await import('impit');
+          const browser = await chromium.launch({headless: true, args: ['--no-sandbox']});
+          const page = await browser.newPage();
+          await page.setContent('<title>offline-smoke</title>');
+          if (await page.title() !== 'offline-smoke') throw Error('Chromium smoke failed');
+          console.log('Chromium and impit ready');
+          await browser.close();
+          JS
+      - name: Package verified images and publish a Release
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9][A-Za-z0-9._-]*$ ]] || { echo 'Invalid release tag'; exit 1; }
+          docker save bing-rewards-backend:local bing-rewards-dashboard:local | gzip -1 > bing-rewards-images-linux-amd64.tar.gz
+          sha256sum bing-rewards-images-linux-amd64.tar.gz > SHA256SUMS
+          gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG 双容器部署包" --notes '包含经无账号启动和浏览器检查的 Linux amd64 双镜像压缩包。使用方式见 README；程序不含真实账号或部署数据。' bing-rewards-images-linux-amd64.tar.gz SHA256SUMS
+      - if: always()
+        run: docker compose down
